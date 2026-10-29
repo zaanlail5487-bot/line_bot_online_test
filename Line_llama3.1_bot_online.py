@@ -32,7 +32,7 @@ handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 # OpenRouter AI 設定 (替代本地 Ollama)
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
+    api_key=("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"),
 )
 # 這裡使用 OpenRouter 上的 Llama 3.1 免費模型（或依需求更換）
 MODEL_NAME = "meta-llama/llama-3.1-8b-instruct:free"
