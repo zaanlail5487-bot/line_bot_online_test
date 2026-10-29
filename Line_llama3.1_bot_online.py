@@ -3,9 +3,11 @@ import uuid
 import requests
 import yt_dlp
 import imageio_ffmpeg
+import time
 from flask import Flask, request, abort, send_from_directory, make_response, jsonify
 from dotenv import load_dotenv
 from openai import OpenAI
+from openai import OpenAI, RateLimitError
 
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
@@ -34,18 +36,30 @@ client = OpenAI(
     api_key=os.environ.get("OPENROUTER_API_KEY"),
 )
 
-response = client.chat.completions.create(
-    model="openrouter/free",  # 自動路由到任何當前可用的免費模型
-    messages=[{"role": "user", "content": "你好，請自我介紹！"}],
-    # 關鍵：允許 openrouter/free 自由調度所有免費供應商通道
-    extra_body={
-        "provider": {
-            "zdr": False,  # 不強制要求 Zero Data Retention
-            "data_collection": "allow",  # 允許非 ZDR 的免費通道
-        }
-    },
-)
-
+def ask_openrouter_with_retry(prompt, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model="openrouter/free",
+                messages=[{"role": "user", "content": prompt}],
+                extra_body={
+                    "provider": {
+                        "zdr": False,
+                        "data_collection": "allow"
+                    }
+                }
+            )
+            return response.choices[0].message.content
+        except RateLimitError:
+            wait_time = (attempt + 1) * 3  # 遇到 429 時，依序等待 3s, 6s, 9s 後重試
+            print(f"觸發 Rate Limit (429)，等待 {wait_time} 秒後重試...")
+            time.sleep(wait_time)
+        except Exception as e:
+            print(f"其他錯誤：{e}")
+            break
+            
+    return "目前 AI 伺服器忙碌（Rate Limit），請稍後再試！"
+    
 # 印出 AI 的回答
 print("AI 回應：", response.choices[0].message.content)
 
