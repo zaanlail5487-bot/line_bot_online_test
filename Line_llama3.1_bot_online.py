@@ -29,12 +29,28 @@ app = Flask(__name__)
 configuration = Configuration(access_token=os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
-# OpenRouter AI 設定 (替代本地 Ollama)
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
+    api_key=os.environ.get("OPENROUTER_API_KEY"),
 )
-MODEL_NAME = "openrouter/free"
+
+response = client.chat.completions.create(
+    model="openrouter/free",  # 自動路由到任何當前可用的免費模型
+    messages=[{"role": "user", "content": "你好，請自我介紹！"}],
+    # 關鍵：允許 openrouter/free 自由調度所有免費供應商通道
+    extra_body={
+        "provider": {
+            "zdr": False,  # 不強制要求 Zero Data Retention
+            "data_collection": "allow",  # 允許非 ZDR 的免費通道
+        }
+    },
+)
+
+# 印出 AI 的回答
+print("AI 回應：", response.choices[0].message.content)
+
+# 印出 OpenRouter 這次幫你選到了哪一個免費模型
+print("這次使用的模型是：", response.model)
 
 # 伺服器網址與音樂暫存目錄
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:5000").rstrip('/')
