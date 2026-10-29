@@ -35,7 +35,7 @@ client = OpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY"),
 )
 # 這裡使用 OpenRouter 上的 Llama 3.1 免費模型（或依需求更換）
-MODEL_NAME = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+MODEL_NAME = "meta-llama/llama-3.1-8b-instruct:free"
 
 # 伺服器網址與音樂暫存目錄
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:5000").rstrip('/')
