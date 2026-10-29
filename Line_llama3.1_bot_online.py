@@ -112,7 +112,7 @@ def get_ai_response(user_message: str) -> str:
         return response.choices[0].message.content.strip()
     except Exception as e:
         print(f"[OpenRouter 錯誤]: {e}")
-        return "AI 回應失敗，請確認 OpenRouter API Key 是否正確設定。"
+        return f"AI 錯誤詳情：{e}"
 
 
 # ---------------- HTTP 群發 API (供外部網址/腳本觸發) ----------------
