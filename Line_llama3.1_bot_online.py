@@ -3,11 +3,9 @@ import uuid
 import requests
 import yt_dlp
 import imageio_ffmpeg
-import time
 from flask import Flask, request, abort, send_from_directory, make_response, jsonify
 from dotenv import load_dotenv
 from openai import OpenAI
-from openai import OpenAI, RateLimitError
 
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
@@ -31,40 +29,13 @@ app = Flask(__name__)
 configuration = Configuration(access_token=os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
+# OpenRouter AI 設定 (替代本地 Ollama)
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key=os.environ.get("OPENROUTER_API_KEY"),
+    api_key=os.getenv("OPENROUTER_API_KEY"),
 )
-
-def ask_openrouter_with_retry(prompt, max_retries=3):
-    for attempt in range(max_retries):
-        try:
-            response = client.chat.completions.create(
-                model="openrouter/free",
-                messages=[{"role": "user", "content": prompt}],
-                extra_body={
-                    "provider": {
-                        "zdr": False,
-                        "data_collection": "allow"
-                    }
-                }
-            )
-            return response.choices[0].message.content
-        except RateLimitError:
-            wait_time = (attempt + 1) * 3  # 遇到 429 時，依序等待 3s, 6s, 9s 後重試
-            print(f"觸發 Rate Limit (429)，等待 {wait_time} 秒後重試...")
-            time.sleep(wait_time)
-        except Exception as e:
-            print(f"其他錯誤：{e}")
-            break
-            
-    return "目前 AI 伺服器忙碌（Rate Limit），請稍後再試！"
-    
-# 印出 AI 的回答
-print("AI 回應：", response.choices[0].message.content)
-
-# 印出 OpenRouter 這次幫你選到了哪一個免費模型
-print("這次使用的模型是：", response.model)
+# 這裡使用 OpenRouter 上的 Llama 3.1 免費模型（或依需求更換）
+MODEL_NAME = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
 
 # 伺服器網址與音樂暫存目錄
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:5000").rstrip('/')
@@ -141,7 +112,7 @@ def get_ai_response(user_message: str) -> str:
         return response.choices[0].message.content.strip()
     except Exception as e:
         print(f"[OpenRouter 錯誤]: {e}")
-        return f"AI 錯誤詳情：{e}"
+        return "AI 回應失敗，請確認 OpenRouter API Key 是否正確設定。"
 
 
 # ---------------- HTTP 群發 API (供外部網址/腳本觸發) ----------------
