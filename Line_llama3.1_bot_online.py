@@ -34,7 +34,7 @@ client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY"),
 )
-MODEL_NAME = "meta-llama/llama-3.1-8b-instruct:free"
+MODEL_NAME = "google/gemma-2-9b-it:free"
 
 # 伺服器網址與音樂暫存目錄
 SERVER_URL = os.getenv("SERVER_URL", "http://localhost:5000").rstrip('/')
