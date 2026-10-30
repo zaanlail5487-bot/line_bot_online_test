@@ -53,21 +53,28 @@ def get_youtube_audio_url(query: str):
         'format': 'bestaudio[ext=m4a]/bestaudio', # 優先抓取原生 m4a/aac 格式
         'noplaylist': True,
         'quiet': True,
-        'skip_download': True, # 關鍵：不下載檔案到 Render 硬碟
+        'skip_download': True, # 不下載檔案到 Render 硬碟
+        'extract_flat': False, # 確保提取完整影音串流資訊
     }
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # 使用 YouTube 搜尋第一筆結果
             info = ydl.extract_info(f"ytsearch1:{query}", download=False)
             if 'entries' in info and len(info['entries']) > 0:
-                video = info['entries'][0]
-                duration_ms = int(video.get('duration', 0) * 1000)
+                # 💡 關鍵修正：必須取陣列的第一個元素 [0]，它才是單支影片的字典物件
+                video = info['entries'][0] 
                 
-                return {
-                    'title': video.get('title'),
-                    'url': video.get('url'), # 這是直連的 HTTPS 音訊網址
-                    'duration': duration_ms
-                }
+                duration_ms = int(video.get('duration', 0) * 1000)
+                audio_url = video.get('url')
+                
+                if audio_url:
+                    print(f"[yt-dlp 成功提取] 標題: {video.get('title')}")
+                    return {
+                        'title': video.get('title'),
+                        'url': audio_url,
+                        'duration': duration_ms
+                    }
     except Exception as e:
         print(f"[yt-dlp 串流提取錯誤]: {e}")
     return None
