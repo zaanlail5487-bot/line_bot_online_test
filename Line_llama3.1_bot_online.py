@@ -48,43 +48,35 @@ def send_broadcast_message(text_content: str) -> bool:
 
 
 def get_youtube_audio_url(query: str):
-    """雲端優化抗封鎖版：加入瀏覽器模擬，防止 YouTube 回傳 403 阻擋"""
-    ydl_opts = {
-        # 💡 優化 1：放寬格式限制，如果沒有原生 m4a，就抓最佳音訊（自動轉格式或相容串流）
-        'format': 'bestaudio/best', 
-        'noplaylist': True,
-        'quiet': True,
-        'skip_download': True,
-        
-        # 💡 優化 2：加入模擬真實瀏覽器的 Headers，降低被 YouTube 判定為機器人的機率
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
-        }
-    }
+    """替代方案：利用公開音訊 API 避開機房 IP 被 YouTube 阻擋的問題"""
+    import urllib.parse
+    import requests
     
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            print(f"[yt-dlp 正在搜尋]: {query}")
-            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
-            if 'entries' in info and len(info['entries']) > 0:
-                video = info['entries'][0]
-                
-                duration_ms = int(video.get('duration', 0) * 1000)
-                audio_url = video.get('url')
-                
-                if audio_url:
-                    print(f"[yt-dlp 成功提取] 標題: {video.get('title')}")
-                    return {
-                        'title': video.get('title'),
-                        'url': audio_url,
-                        'duration': duration_ms
-                    }
+        # 將歌名進行 URL 編碼
+        encoded_query = urllib.parse.quote(query)
+        print(f"[API 音樂搜尋中]: {query}")
+        
+        # 使用開源免費的音樂解析解析 API (此處以通用的第三方的音訊串流轉換 API 為例)
+        # 💡 提示：此處改用直接向穩定的串流聚合伺服器請求，不再透過 Render 本機執行 yt-dlp
+        api_url = f"https://vkeys.cn{encoded_query}" 
+        
+        # 發送請求
+        res = requests.get(api_url, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("code") == 200 or data.get("success"):
+                # 根據不同公開 API 的回傳結構微調，通常包含標題與直連網址
+                return {
+                    'title': data.get("title", query),
+                    'url': data.get("url"),          # 必須是 https 開頭的音訊直連網址
+                    'duration': 240000              # LINE 預設長度 (毫秒)，可填 4 分鐘
+                }
     except Exception as e:
-        # 💡 這行非常關鍵！請到 Render Logs 看這裡印出什麼，通常會看到 "HTTP Error 403: Forbidden"
-        print(f"[yt-dlp 串流提取錯誤]: {e}") 
+        print(f"[音樂 API 請求失敗]: {e}")
+        
     return None
+
 
 
 
