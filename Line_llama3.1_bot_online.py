@@ -1,11 +1,8 @@
 import os
-import uuid
 import requests
 import yt_dlp
-import imageio_ffmpeg
-from flask import Flask, request, abort, send_from_directory, make_response, jsonify
+from flask import Flask, request, abort, jsonify
 from dotenv import load_dotenv
-from openai import OpenAI
 
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
@@ -29,19 +26,9 @@ app = Flask(__name__)
 configuration = Configuration(access_token=os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
-# OpenRouter AI 設定 (替代本地 Ollama)
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-)
-# 這裡使用 OpenRouter 上的 Llama 3.1 免費模型（或依需求更換）
-MODEL_NAME = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
-
-# 伺服器網址與音樂暫存目錄
-SERVER_URL = os.getenv("SERVER_URL", "http://localhost:5000").rstrip('/')
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio")
-os.makedirs(AUDIO_DIR, exist_ok=True)
+# OpenRouter 設定（優先從環境變數讀取）
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = "google/gemma-2-9b-it:free"  # 使用 OpenRouter 的免費模型
 
 
 def send_broadcast_message(text_content: str) -> bool:
@@ -60,62 +47,67 @@ def send_broadcast_message(text_content: str) -> bool:
         return False
 
 
-def download_youtube_audio(query: str):
-    """搜尋 YouTube 並轉碼為標準 AAC (.m4a)，使用 Render 內建的 imageio-ffmpeg"""
-    file_id = str(uuid.uuid4())[:8]
-    output_template = os.path.join(AUDIO_DIR, f"{file_id}.%(ext)s")
-    
-    # 自動取得套件內建的 ffmpeg 執行檔路徑，適配 Render 雲端環境
-    ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
-
+def get_youtube_audio_url(query: str):
+    """雲端優化版：不下載檔案，直接提取 YouTube 直連音訊 m4a 串流網址"""
     ydl_opts = {
-        'format': 'bestaudio/best',
+        'format': 'bestaudio[ext=m4a]/bestaudio', # 優先抓取原生 m4a/aac 格式
         'noplaylist': True,
         'quiet': True,
-        'outtmpl': output_template,
-        'ffmpeg_location': ffmpeg_path,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'm4a',
-            'preferredquality': '192',
-        }],
-        'postprocessor_args': ['-c:a', 'aac', '-b:a', '128k'],
+        'skip_download': True, # 關鍵：不下載檔案到 Render 硬碟
     }
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch1:{query}", download=True)
+            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
             if 'entries' in info and len(info['entries']) > 0:
                 video = info['entries'][0]
-                filename = f"{file_id}.m4a"
                 duration_ms = int(video.get('duration', 0) * 1000)
+                
+                # LINE 要求的音訊上限通常為 1 分鐘 (60000ms)，部分情況放寬
+                # 這裡過濾太長的影片以確保播放成功
                 return {
                     'title': video.get('title'),
-                    'filename': filename,
+                    'url': video.get('url'), # 這是直連的 HTTPS 音訊網址
                     'duration': duration_ms
                 }
     except Exception as e:
-        print(f"[yt-dlp 錯誤]: {e}")
+        print(f"[yt-dlp 串流提取錯誤]: {e}")
     return None
 
 
-def get_ai_response(user_message: str) -> str:
-    """透過 OpenRouter API 進行繁體中文對話"""
+def get_openrouter_response(user_message: str) -> str:
+    """呼叫 OpenRouter Free API 進行繁體中文對話"""
+    if not OPENROUTER_API_KEY:
+        return "❌ 系統錯誤：未設定 OpenRouter API Key。"
+        
     try:
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": OPENROUTER_MODEL,
+            "messages": [
                 {"role": "system", "content": "你是一個 Line 上的繁體中文 AI 助手，請簡潔親切地回答問題。"},
                 {"role": "user", "content": user_message}
             ]
+        }
+        
+        res = requests.post(
+            "https://openrouter.ai", 
+            headers=headers, 
+            json=payload, 
+            timeout=30
         )
-        return response.choices[0].message.content.strip()
+        
+        if res.status_code == 200:
+            return res.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        return f"AI 回應失敗 (錯誤碼: {res.status_code})"
     except Exception as e:
-        print(f"[OpenRouter 錯誤]: {e}")
-        return "AI 回應失敗，請確認 OpenRouter API Key 是否正確設定。"
+        return f"無法連線至 OpenRouter AI 服務: {e}"
 
 
-# ---------------- HTTP 群發 API (供外部網址/腳本觸發) ----------------
+# ---------------- HTTP 群發 API ----------------
 
 @app.route('/broadcast', methods=['POST', 'GET'])
 def http_broadcast():
@@ -131,18 +123,6 @@ def http_broadcast():
         return jsonify({"status": "success", "message": f"成功群發：{msg}"}), 200
     else:
         return jsonify({"status": "error", "reason": "群發失敗，請確認 Access Token"}), 500
-
-
-# ---------------- 靜態音訊檔案路由 (繞過防護) ----------------
-
-@app.route('/static/audio/<filename>')
-def serve_audio(filename):
-    response = make_response(send_from_directory(AUDIO_DIR, filename, mimetype="audio/mp4"))
-    response.headers['ngrok-skip-browser-warning'] = 'true'
-    response.headers['User-Agent'] = 'LINE-Bot'
-    response.headers['Accept-Ranges'] = 'bytes'
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    return response
 
 
 # ---------------- LINE Webhook 接收端 ----------------
@@ -167,7 +147,7 @@ def handle_message(event):
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
 
-        # 1. 無權限限制的群發功能
+        # 1. 群發功能
         if user_text.startswith("群發 "):
             broadcast_msg = user_text.replace("群發 ", "").strip()
             
@@ -198,14 +178,14 @@ def handle_message(event):
                 )
                 return
 
-            song_info = download_youtube_audio(song_name)
-            if song_info:
-                audio_url = f"{SERVER_URL}/static/audio/{song_info['filename']}"
-                print(f"[發送音訊網址]: {audio_url}")
+            # 直接向 YouTube 提取串流 URL
+            song_info = get_youtube_audio_url(song_name)
+            if song_info and song_info['url']:
+                print(f"[線上串流音訊網址]: {song_info['url']}")
                 reply_messages = [
                     TextMessage(text=f"🎵 為您播放：{song_info['title']}"),
                     AudioMessage(
-                        original_content_url=audio_url,
+                        original_content_url=song_info['url'],
                         duration=song_info['duration']
                     )
                 ]
@@ -219,8 +199,8 @@ def handle_message(event):
                 )
             )
         else:
-            # 3. AI 聊天模式 (透過 OpenRouter)
-            ai_reply = get_ai_response(user_text)
+            # 3. AI 聊天模式 (OpenRouter)
+            ai_reply = get_openrouter_response(user_text)
             line_bot_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
@@ -230,4 +210,5 @@ def handle_message(event):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
