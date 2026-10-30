@@ -48,22 +48,28 @@ def send_broadcast_message(text_content: str) -> bool:
 
 
 def get_youtube_audio_url(query: str):
-    """雲端優化版：不下載檔案，直接提取 YouTube 直連音訊 m4a 串流網址"""
+    """雲端優化抗封鎖版：加入瀏覽器模擬，防止 YouTube 回傳 403 阻擋"""
     ydl_opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio', # 優先抓取原生 m4a/aac 格式
+        # 💡 優化 1：放寬格式限制，如果沒有原生 m4a，就抓最佳音訊（自動轉格式或相容串流）
+        'format': 'bestaudio/best', 
         'noplaylist': True,
         'quiet': True,
-        'skip_download': True, # 不下載檔案到 Render 硬碟
-        'extract_flat': False, # 確保提取完整影音串流資訊
+        'skip_download': True,
+        
+        # 💡 優化 2：加入模擬真實瀏覽器的 Headers，降低被 YouTube 判定為機器人的機率
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+        }
     }
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # 使用 YouTube 搜尋第一筆結果
+            print(f"[yt-dlp 正在搜尋]: {query}")
             info = ydl.extract_info(f"ytsearch1:{query}", download=False)
             if 'entries' in info and len(info['entries']) > 0:
-                # 💡 關鍵修正：必須取陣列的第一個元素 [0]，它才是單支影片的字典物件
-                video = info['entries'][0] 
+                video = info['entries'][0]
                 
                 duration_ms = int(video.get('duration', 0) * 1000)
                 audio_url = video.get('url')
@@ -76,8 +82,10 @@ def get_youtube_audio_url(query: str):
                         'duration': duration_ms
                     }
     except Exception as e:
-        print(f"[yt-dlp 串流提取錯誤]: {e}")
+        # 💡 這行非常關鍵！請到 Render Logs 看這裡印出什麼，通常會看到 "HTTP Error 403: Forbidden"
+        print(f"[yt-dlp 串流提取錯誤]: {e}") 
     return None
+
 
 
 def get_openrouter_response(user_message: str) -> str:
