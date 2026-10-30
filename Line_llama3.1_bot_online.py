@@ -1,7 +1,7 @@
 import os
 import json
 import requests
-import yt_dlp
+import urllib.parse
 from flask import Flask, request, abort, jsonify
 from dotenv import load_dotenv
 
@@ -27,7 +27,7 @@ app = Flask(__name__)
 configuration = Configuration(access_token=os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
-# OpenRouter 設定（優先從環境變數讀取）
+# OpenRouter 設定
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 
@@ -47,37 +47,32 @@ def send_broadcast_message(text_content: str) -> bool:
         return False
 
 
-def get_youtube_audio_url(query: str):
-    """終極防封鎖版：聚合多個獨立音樂 API 管道（支援 YouTube/網易雲/多點自動備援機制）"""
-    import urllib.parse
-    import requests
-    
+def get_online_audio_url(query: str):
+    """【全新防封鎖版】完全不用 yt-dlp，聚合多個獨立高防護音樂 API 管道"""
     encoded_query = urllib.parse.quote(query)
-    print(f"[音樂全網搜尋中]: {query}")
+    print(f"[全網音樂搜尋中]: {query}")
     
-    # ---------------- 管道一：網易雲音樂聚合解析 (極度穩定、速度極快) ----------------
+    # ---------------- 管道一：網易雲/QQ 音樂聚合解析 (極度穩定、速度極快) ----------------
     try:
-        # 使用通用且高防護的網易雲/QQ 音樂開源解析介面
         netease_api = f"https://uomg.com{encoded_query}&format=json"
-        res = requests.get(netease_api, timeout=8)
+        res = requests.get(netease_api, timeout=7)
         if res.status_code == 200:
             data = res.json()
             if data.get("code") == 1 and data.get("data", {}).get("url"):
                 music_info = data.get("data", {})
-                print(f"[管道一成功] 從網易雲音樂成功提取: {music_info.get('name')}")
+                print(f"[管道一成功] 成功提取: {music_info.get('name')}")
                 return {
                     'title': f"{music_info.get('name')} - {music_info.get('artistsname')}",
                     'url': music_info.get('url'),
                     'duration': 240000  # 預設 4 分鐘
                 }
     except Exception as e:
-        print(f"⚠️ 管道一 (網易雲) 嘗試失敗: {e}，切換至備援管道...")
+        print(f"⚠️ 管道一嘗試失敗: {e}，切換至下一管道...")
 
-    # ---------------- 管道二：通用開源影音 API (自動轉換 YouTube 音訊) ----------------
+    # ---------------- 管道二：通用公共影音 API (免 Key 轉 YouTube 音訊網址) ----------------
     try:
-        # 使用免 Key 的熱門聚合轉檔服務介面
         youtube_api = f"https://p6p.cn{encoded_query}"
-        res = requests.get(youtube_api, timeout=8)
+        res = requests.get(youtube_api, timeout=7)
         if res.status_code == 200:
             data = res.json()
             if (data.get("code") == 200 or data.get("success")) and data.get("url"):
@@ -88,13 +83,12 @@ def get_youtube_audio_url(query: str):
                     'duration': 240000
                 }
     except Exception as e:
-        print(f"⚠️ 管道二 (YouTube API) 嘗試失敗: {e}，切換至下一管道...")
+        print(f"⚠️ 管道二嘗試失敗: {e}，切換至下一管道...")
 
-    # ---------------- 管道三：公共 SoundCloud / 影音直連備援介面 ----------------
+    # ---------------- 管道三：雲端影音直連備援介面 ----------------
     try:
-        # 第三方備用影音解析網址
         backup_api = f"https://nexmoe.com{encoded_query}"
-        res = requests.get(backup_api, timeout=8)
+        res = requests.get(backup_api, timeout=7)
         if res.status_code == 200:
             data = res.json()
             if data and data.get("url"):
@@ -105,23 +99,17 @@ def get_youtube_audio_url(query: str):
                     'duration': int(data.get("duration", 240)) * 1000 if "duration" in data else 240000
                 }
     except Exception as e:
-        print(f"⚠️ 管道三 (備援介面) 嘗試失敗: {e}")
+        print(f"⚠️ 管道三嘗試失敗: {e}")
 
-    # 所有的音樂管道皆無法取得這首歌
     print(f"❌ [全網音樂搜尋失敗]: {query} 無法在任何開源管道中解析音訊。")
     return None
 
 
-
-
-
-
 def get_openrouter_response(user_message: str) -> str:
-    """呼叫 OpenRouter 進行繁體中文對話（支援多免費模型自動備援版）"""
+    """呼叫 OpenRouter 進行繁體中文對話（多免費模型自動輪詢備援機制）"""
     if not OPENROUTER_API_KEY:
         return "❌ 系統錯誤：未設定 OpenRouter API Key，請檢查 Render 環境變數。"
         
-    # 精選目前最穩定且回應快速的免費模型清單（排在前面的優先嘗試）
     available_models = [
         "google/gemma-2-9b-it:free",
         "meta-llama/llama-3.3-70b-instruct:free",
@@ -132,8 +120,8 @@ def get_openrouter_response(user_message: str) -> str:
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY.strip()}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://localhost:3000",  # OpenRouter 使用免費模型之規範必填
-        "X-Title": "LineBotChat"                     # OpenRouter 使用免費模型之規範必填
+        "HTTP-Referer": "https://localhost:3000",
+        "X-Title": "LineBotChat"
     }
     
     api_url = "https://openrouter.ai"
@@ -149,25 +137,17 @@ def get_openrouter_response(user_message: str) -> str:
             }
             
             print(f"[AI 嘗試使用模型]: {model}")
-            res = requests.post(
-                api_url, 
-                headers=headers, 
-                data=json.dumps(payload),
-                timeout=15  # 超時自動切換下一個模型
-            )
+            res = requests.post(api_url, headers=headers, data=json.dumps(payload), timeout=15)
                 
             if res.status_code == 200:
                 response_json = res.json()
                 choices = response_json.get("choices")
-                
-                # 💡 關鍵修正：choices 是 list 類型，必須透過 choices[0] 取得物件
                 if choices and isinstance(choices, list) and len(choices) > 0:
                     content = choices[0].get("message", {}).get("content", "").strip()
                     if content:
                         print(f"[AI 回應成功] 使用模型: {model}")
                         return content
             
-            # 若非 200 回應，印出細節到 Render Log 方便排查
             print(f"⚠️ 模型 {model} 請求失敗 (狀態碼: {res.status_code})，原因: {res.text}，嘗試下一個備援...")
             
         except Exception as e:
@@ -248,8 +228,8 @@ def handle_message(event):
                 )
                 return
 
-            # 直接向 YouTube 提取串流 URL
-            song_info = get_youtube_audio_url(song_name)
+            # 💡 修正：呼叫全新的線上聚合解析函式
+            song_info = get_online_audio_url(song_name)
             if song_info and song_info['url']:
                 print(f"[線上串流音訊網址]: {song_info['url']}")
                 reply_messages = [
@@ -260,7 +240,7 @@ def handle_message(event):
                     )
                 ]
             else:
-                reply_messages = [TextMessage(text="抱歉，找不到或無法處理該首歌曲！")]
+                reply_messages = [TextMessage(text="抱歉，全網音樂管道目前暫時無法解析該首歌曲！")]
 
             line_bot_api.reply_message(
                 ReplyMessageRequest(
