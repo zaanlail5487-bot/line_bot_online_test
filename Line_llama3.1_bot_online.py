@@ -76,7 +76,7 @@ def get_youtube_audio_url(query: str):
 
 
 def get_openrouter_response(user_message: str) -> str:
-    """呼叫 OpenRouter Free API 進行繁體中文對話（精準網址與防跳轉版）"""
+    """呼叫 OpenRouter 進行繁體中文對話（支援多免費模型自動備援版）"""
     if not OPENROUTER_API_KEY:
         return "❌ 系統錯誤：未設定 OpenRouter API Key，請檢查 Render 環境變數。"
         
@@ -85,8 +85,17 @@ def get_openrouter_response(user_message: str) -> str:
             "Authorization": f"Bearer {OPENROUTER_API_KEY.strip()}",
             "Content-Type": "application/json"
         }
+        
+        # 💡 重點優化：將原本的 'model': 'xxx' 改為 'models' 陣列
+        # 這裡放入多個目前 OpenRouter 熱門且效果很好的免費模型
+        # 當排在前面的模型遇到全域 429 限流時，OpenRouter 會依序嘗試後面的備援
         payload = {
-            "model": OPENROUTER_MODEL,
+            "models": [
+                "google/gemma-2-9b-it:free",
+                "meta-llama/llama-3.3-70b-instruct:free",
+                "deepseek/deepseek-chat:free",
+                "qwen/qwen-2.5-72b-instruct:free"
+            ],
             "messages": [
                 {"role": "system", "content": "你是一個 Line 上的繁體中文 AI 助手，請簡潔親切地回答問題。"},
                 {"role": "user", "content": user_message}
@@ -94,21 +103,14 @@ def get_openrouter_response(user_message: str) -> str:
         }
         
         import json
-        
-        # 💡 請務必檢查此行網址，結尾絕對不能有空格，且必須是完整的 https ... /chat/completions 
-        api_url = "https://openrouter.ai/api/v1/chat/completions"
+        api_url = "https://openrouter.ai"
         
         res = requests.post(
             api_url, 
             headers=headers, 
             data=json.dumps(payload),
-            allow_redirects=False, # 💡 關鍵：禁止自動跳轉，防止 POST 被轉為 GET 而噴 405
             timeout=30
         )
-        
-        # 檢查是否發生了重新導向
-        if res.status_code in [301, 302, 307, 308]:
-            return f"❌ 偵測到網址重新導向 ({res.status_code})，請確認 api_url 網址字元是否完全正確。\n導向至: {res.headers.get('Location')}"
             
         if res.status_code == 200:
             try:
@@ -117,6 +119,7 @@ def get_openrouter_response(user_message: str) -> str:
             except Exception as json_err:
                 return f"❌ 解析 AI 回應失敗：{json_err}"
         else:
+            # 如果所有的免費備援模型都被塞爆了，才會走到這裡輸出錯誤訊息
             return f"❌ OpenRouter 拒絕連線 (錯誤碼: {res.status_code})\n原因: {res.text}"
             
     except Exception as e:
