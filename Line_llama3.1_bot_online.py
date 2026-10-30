@@ -48,54 +48,69 @@ def send_broadcast_message(text_content: str) -> bool:
 
 
 def get_youtube_audio_url(query: str):
-    """防封鎖雲端優化版：捨棄 yt-dlp，改用高穩定度的第三方公開 YouTube 音訊解析網址"""
+    """終極防封鎖版：聚合多個獨立音樂 API 管道（支援 YouTube/網易雲/多點自動備援機制）"""
     import urllib.parse
     import requests
     
+    encoded_query = urllib.parse.quote(query)
+    print(f"[音樂全網搜尋中]: {query}")
+    
+    # ---------------- 管道一：網易雲音樂聚合解析 (極度穩定、速度極快) ----------------
     try:
-        # 將歌名進行 URL 編碼（例如：點歌 晴天 -> %E6%99%B4%E5%A4%A9）
-        encoded_query = urllib.parse.quote(query)
-        print(f"[音樂搜尋中]: {query}")
-        
-        # 使用目前網路上最穩定且免費的 YouTube 影音聚合解析 API
-        # 該 API 會自動在後端搜尋 YouTube 並轉出直連音訊
-        api_url = f"https://nexmoe.com{encoded_query}"
-        
-        res = requests.get(api_url, timeout=12)
+        # 使用通用且高防護的網易雲/QQ 音樂開源解析介面
+        netease_api = f"https://uomg.com{encoded_query}&format=json"
+        res = requests.get(netease_api, timeout=8)
         if res.status_code == 200:
             data = res.json()
-            
-            # 讀取 API 回傳的影音資料（此處依據通用開源音訊 API 的標準格式解析）
-            if data and "url" in data:
-                title = data.get("title", query)
-                audio_url = data.get("url")
-                # 取得歌曲長度（毫秒），若無則預設為 4 分鐘 (240000 ms)
-                duration_ms = int(data.get("duration", 240)) * 1000 if "duration" in data else 240000
-                
-                print(f"[音樂 API 解析成功] 標題: {title}")
+            if data.get("code") == 1 and data.get("data", {}).get("url"):
+                music_info = data.get("data", {})
+                print(f"[管道一成功] 從網易雲音樂成功提取: {music_info.get('name')}")
                 return {
-                    'title': title,
-                    'url': audio_url,
-                    'duration': duration_ms
+                    'title': f"{music_info.get('name')} - {music_info.get('artistsname')}",
+                    'url': music_info.get('url'),
+                    'duration': 240000  # 預設 4 分鐘
                 }
-                
-        # 備援 API 機制（如果第一個 API 剛好失效，自動走第二個備援介面）
-        print("⚠️ 優先音樂 API 未回應，嘗試啟動備援音樂解析 API...")
-        backup_url = f"https://p6p.cn{encoded_query}"
-        res_backup = requests.get(backup_url, timeout=12)
-        if res_backup.status_code == 200:
-            data_b = res_backup.json()
-            if data_b.get("code") == 200 and data_b.get("url"):
+    except Exception as e:
+        print(f"⚠️ 管道一 (網易雲) 嘗試失敗: {e}，切換至備援管道...")
+
+    # ---------------- 管道二：通用開源影音 API (自動轉換 YouTube 音訊) ----------------
+    try:
+        # 使用免 Key 的熱門聚合轉檔服務介面
+        youtube_api = f"https://p6p.cn{encoded_query}"
+        res = requests.get(youtube_api, timeout=8)
+        if res.status_code == 200:
+            data = res.json()
+            if (data.get("code") == 200 or data.get("success")) and data.get("url"):
+                print(f"[管道二成功] 從開源 YouTube API 成功提取: {query}")
                 return {
-                    'title': data_b.get("title", query),
-                    'url': data_b.get("url"),
+                    'title': data.get("title", query),
+                    'url': data.get("url"),
                     'duration': 240000
                 }
-                
     except Exception as e:
-        print(f"[音樂 API 請求發生異常]: {e}")
-        
+        print(f"⚠️ 管道二 (YouTube API) 嘗試失敗: {e}，切換至下一管道...")
+
+    # ---------------- 管道三：公共 SoundCloud / 影音直連備援介面 ----------------
+    try:
+        # 第三方備用影音解析網址
+        backup_api = f"https://nexmoe.com{encoded_query}"
+        res = requests.get(backup_api, timeout=8)
+        if res.status_code == 200:
+            data = res.json()
+            if data and data.get("url"):
+                print(f"[管道三成功] 從備援影音介面成功提取: {query}")
+                return {
+                    'title': data.get("title", query),
+                    'url': data.get("url"),
+                    'duration': int(data.get("duration", 240)) * 1000 if "duration" in data else 240000
+                }
+    except Exception as e:
+        print(f"⚠️ 管道三 (備援介面) 嘗試失敗: {e}")
+
+    # 所有的音樂管道皆無法取得這首歌
+    print(f"❌ [全網音樂搜尋失敗]: {query} 無法在任何開源管道中解析音訊。")
     return None
+
 
 
 
