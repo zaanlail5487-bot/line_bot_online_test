@@ -48,102 +48,52 @@ def send_broadcast_message(text_content: str) -> bool:
 
 
 def get_online_audio_url(query: str):
-    """【終極穩定版】改用開源 cobalt API 搭配 YouTube 搜尋，徹底解決失效問題"""
+    """【高穩定備援版】將搜尋機制與音訊解碼分離，並加入穩定開源音訊庫"""
     import urllib.parse
     import requests
     
-    print(f"[cobalt 萬能解析啟動]: {query}")
+    encoded_query = urllib.parse.quote(query)
+    print(f"[進行最穩定渠道搜尋]: {query}")
     
-    # ---------------- 第一步：透過免 Key 的 YouTube 搜尋橋樑找到影片 ID ----------------
-    video_id = None
+    # ---------------- 管道一：網易雲音樂公共節點 (適合絕大多數華語流行歌) ----------------
     try:
-        # 使用一個極速且穩定的 YouTube 輕量搜尋 API
-        search_url = f"https://priv.au{urllib.parse.quote(query)}"
-        res = requests.get(search_url, timeout=5)
+        # 這是目前開源社群維護最穩定的公共網易音訊映射鏈接
+        api_url = f"https://lolimi.cn{encoded_query}&num=1"
+        res = requests.get(api_url, timeout=6)
         if res.status_code == 200:
-            results = res.json()
-            if results and isinstance(results, list) and len(results) > 0:
-                # 順利拿到第一個搜尋結果的 videoId
-                video_id = results[0].get("videoId")
-                song_title = results[0].get("title", query)
-                print(f"[YouTube 搜尋成功] 找到影片 ID: {video_id}, 標題: {song_title}")
-    except Exception as search_err:
-        print(f"⚠️ YouTube 搜尋橋樑失效: {search_err}")
-
-    # 如果第一步搜不到，就用第二個備援搜尋介面
-    if not video_id:
-        try:
-            backup_search = f"https://kavin.rocks{urllib.parse.quote(query)}&filter=videos"
-            res = requests.get(backup_search, timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-                items = data.get("items", [])
-                if items:
-                    # 格式通常是 /watch?v=xxxx
-                    url_path = items[0].get("url", "")
-                    if "v=" in url_path:
-                        video_id = url_path.split("v=")[-1]
-                        song_title = items[0].get("title", query)
-                        print(f"[備援搜尋成功] 找到影片 ID: {video_id}")
-        except Exception as e:
-            print(f"⚠️ 備援搜尋也失敗: {e}")
-
-    # 如果真的連影片都搜尋不到，嘗試最後盲猜直接把關鍵字丟給公共音樂池
-    if not video_id:
-        print("⚠️ 無法取得 YouTube ID，嘗試最後網易雲音樂備援...")
-        try:
-            netease = f"https://uomg.com{urllib.parse.quote(query)}&format=json"
-            r = requests.get(netease, timeout=5).json()
-            if r.get("code") == 1 and r.get("data", {}).get("url"):
-                return {'title': r['data']['name'], 'url': r['data']['url'], 'duration': 240000}
-        except:
-            return None
-        return None
-
-    # ---------------- 第二步：將 YouTube 網址丟給全球 cobalt 公共節點解析音訊 ----------------
-    youtube_url = f"https://youtube.com{video_id}"
-    
-    # 精選 2026 年目前最穩定、速度最快的 cobalt 公共 API 節點清單
-    cobalt_nodes = [
-        "https://cobalt.tools",
-        "https://perennialte.ch",
-        "https://wuk.sh"
-    ]
-    
-    payload = {
-        "url": youtube_url,
-        "videoQuality": "720", # 雖然是音訊，但部分節點需要此參數
-        "downloadMode": "audio", # 💡 關鍵：指定只要音訊 (mp3/ogg/m4a)
-        "audioFormat": "mp3"
-    }
-    
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json"
-    }
-
-    # 輪詢各個 cobalt 節點，直到解析成功
-    for node in cobalt_nodes:
-        try:
-            print(f"[正在請求 cobalt 節點]: {node}")
-            res = requests.post(node, json=payload, headers=headers, timeout=8)
-            if res.status_code == 200:
-                data = res.json()
-                # cobalt 成功時會直接回傳一個帶有音訊直連的 "url" 欄位
-                if data.get("status") == "stream" or data.get("url"):
-                    audio_url = data.get("url")
-                    print(f"🎉 [cobalt 解析成功] 音訊直連網址: {audio_url}")
+            data = res.json()
+            # 兼容多種公共 API 回傳的常見 JSON 格式
+            if data.get("code") == 200 and data.get("data"):
+                song_data = data.get("data", [{}])[0]
+                if song_data.get("url"):
+                    print(f"[管道一成功] 解析成功: {song_data.get('name')}")
                     return {
-                        'title': song_title,
-                        'url': audio_url,
-                        'duration': 240000 # 預設 4 分鐘
+                        'title': f"{song_data.get('name')} - {song_data.get('singer')}",
+                        'url': song_data.get("url").replace("http://", "https://"), # LINE 嚴格要求必須是 https
+                        'duration': 240000
                     }
-        except Exception as node_err:
-            print(f"⚠️ cobalt 節點 {node} 失敗: {node_err}")
-            continue
+    except Exception as e:
+        print(f"⚠️ 管道一失效: {e}")
 
-    print("❌ 所有 cobalt 節點均無法解析此音訊")
+    # ---------------- 管道二：SoundCloud 穩定公共轉化節點 (適合英文/日韓/流行音樂) ----------------
+    try:
+        # 使用開源免費的公共音訊解析節點，SoundCloud 的防爬蟲機制比 YouTube 寬鬆非常多
+        sc_api = f"https://vkeys.cn{encoded_query}"
+        res = requests.get(sc_api, timeout=6)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("url"):
+                print(f"[管道二成功] 從公共音訊庫提取成功: {query}")
+                return {
+                    'title': data.get("title", query),
+                    'url': data.get("url").replace("http://", "https://"),
+                    'duration': 240000
+                }
+    except Exception as e:
+        print(f"⚠️ 管道二失效: {e}")
+
     return None
+
 
 def get_openrouter_response(user_message: str) -> str:
     """呼叫 OpenRouter 進行繁體中文對話（多免費模型自動輪詢備援機制）"""
