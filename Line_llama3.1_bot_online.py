@@ -1,4 +1,5 @@
 import os
+import json
 import requests
 import yt_dlp
 from flask import Flask, request, abort, jsonify
@@ -28,7 +29,6 @@ handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
 # OpenRouter 設定（優先從環境變數讀取）
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = "OpenRouter/free"  # 使用 OpenRouter 的免費模型
 
 
 def send_broadcast_message(text_content: str) -> bool:
@@ -63,8 +63,6 @@ def get_youtube_audio_url(query: str):
                 video = info['entries'][0]
                 duration_ms = int(video.get('duration', 0) * 1000)
                 
-                # LINE 要求的音訊上限通常為 1 分鐘 (60000ms)，部分情況放寬
-                # 這裡過濾太長的影片以確保播放成功
                 return {
                     'title': video.get('title'),
                     'url': video.get('url'), # 這是直連的 HTTPS 音訊網址
@@ -80,24 +78,22 @@ def get_openrouter_response(user_message: str) -> str:
     if not OPENROUTER_API_KEY:
         return "❌ 系統錯誤：未設定 OpenRouter API Key，請檢查 Render 環境變數。"
         
-    # 定義你想使用的免費模型清單（按優先順序排序）
+    # 精選目前最穩定且回應快速的免費模型清單（排在前面的優先嘗試）
     available_models = [
         "google/gemma-2-9b-it:free",
         "meta-llama/llama-3.3-70b-instruct:free",
-        "deepseek/deepseek-chat:free",
-        "qwen/qwen-2.5-72b-instruct:free"
+        "qwen/qwen-2.5-72b-instruct:free",
+        "deepseek/deepseek-chat:free"
     ]
     
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY.strip()}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://render.com", 
-        "X-Title": "LineBot"
+        "HTTP-Referer": "https://localhost:3000",  # OpenRouter 使用免費模型之規範必填
+        "X-Title": "LineBotChat"                     # OpenRouter 使用免費模型之規範必填
     }
     
-    # 💡 修正：移除重複的 https://
     api_url = "https://openrouter.ai"
-    import json
 
     for model in available_models:
         try:
@@ -114,23 +110,25 @@ def get_openrouter_response(user_message: str) -> str:
                 api_url, 
                 headers=headers, 
                 data=json.dumps(payload),
-                timeout=15
+                timeout=15  # 超時自動切換下一個模型
             )
                 
             if res.status_code == 200:
                 response_json = res.json()
                 choices = response_json.get("choices")
-                if choices and len(choices) > 0:
+                
+                # 💡 關鍵修正：choices 是 list 類型，必須透過 choices[0] 取得物件
+                if choices and isinstance(choices, list) and len(choices) > 0:
                     content = choices[0].get("message", {}).get("content", "").strip()
                     if content:
                         print(f"[AI 回應成功] 使用模型: {model}")
                         return content
             
-            # 如果失敗，印出當前模型的錯誤狀態碼與原因，方便在 Render Log 中排查
+            # 若非 200 回應，印出細節到 Render Log 方便排查
             print(f"⚠️ 模型 {model} 請求失敗 (狀態碼: {res.status_code})，原因: {res.text}，嘗試下一個備援...")
             
         except Exception as e:
-            print(f"⚠️ 連線模型 {model} 發生異常: {e}，嘗試下一個備援...")
+            print(f"⚠️ 連線或解析模型 {model} 發生異常: {e}，嘗試下一個備援...")
             continue
             
     return "❌ 所有 AI 免費備援模型目前皆處於高負載或被限流狀態，請稍後再試。"
