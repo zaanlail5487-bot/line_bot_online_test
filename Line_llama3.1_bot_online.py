@@ -48,62 +48,102 @@ def send_broadcast_message(text_content: str) -> bool:
 
 
 def get_online_audio_url(query: str):
-    """【全新防封鎖版】完全不用 yt-dlp，聚合多個獨立高防護音樂 API 管道"""
-    encoded_query = urllib.parse.quote(query)
-    print(f"[全網音樂搜尋中]: {query}")
+    """【終極穩定版】改用開源 cobalt API 搭配 YouTube 搜尋，徹底解決失效問題"""
+    import urllib.parse
+    import requests
     
-    # ---------------- 管道一：網易雲/QQ 音樂聚合解析 (極度穩定、速度極快) ----------------
+    print(f"[cobalt 萬能解析啟動]: {query}")
+    
+    # ---------------- 第一步：透過免 Key 的 YouTube 搜尋橋樑找到影片 ID ----------------
+    video_id = None
     try:
-        netease_api = f"https://uomg.com{encoded_query}&format=json"
-        res = requests.get(netease_api, timeout=7)
+        # 使用一個極速且穩定的 YouTube 輕量搜尋 API
+        search_url = f"https://priv.au{urllib.parse.quote(query)}"
+        res = requests.get(search_url, timeout=5)
         if res.status_code == 200:
-            data = res.json()
-            if data.get("code") == 1 and data.get("data", {}).get("url"):
-                music_info = data.get("data", {})
-                print(f"[管道一成功] 成功提取: {music_info.get('name')}")
-                return {
-                    'title': f"{music_info.get('name')} - {music_info.get('artistsname')}",
-                    'url': music_info.get('url'),
-                    'duration': 240000  # 預設 4 分鐘
-                }
-    except Exception as e:
-        print(f"⚠️ 管道一嘗試失敗: {e}，切換至下一管道...")
+            results = res.json()
+            if results and isinstance(results, list) and len(results) > 0:
+                # 順利拿到第一個搜尋結果的 videoId
+                video_id = results[0].get("videoId")
+                song_title = results[0].get("title", query)
+                print(f"[YouTube 搜尋成功] 找到影片 ID: {video_id}, 標題: {song_title}")
+    except Exception as search_err:
+        print(f"⚠️ YouTube 搜尋橋樑失效: {search_err}")
 
-    # ---------------- 管道二：通用公共影音 API (免 Key 轉 YouTube 音訊網址) ----------------
-    try:
-        youtube_api = f"https://p6p.cn{encoded_query}"
-        res = requests.get(youtube_api, timeout=7)
-        if res.status_code == 200:
-            data = res.json()
-            if (data.get("code") == 200 or data.get("success")) and data.get("url"):
-                print(f"[管道二成功] 從開源 YouTube API 成功提取: {query}")
-                return {
-                    'title': data.get("title", query),
-                    'url': data.get("url"),
-                    'duration': 240000
-                }
-    except Exception as e:
-        print(f"⚠️ 管道二嘗試失敗: {e}，切換至下一管道...")
+    # 如果第一步搜不到，就用第二個備援搜尋介面
+    if not video_id:
+        try:
+            backup_search = f"https://kavin.rocks{urllib.parse.quote(query)}&filter=videos"
+            res = requests.get(backup_search, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                items = data.get("items", [])
+                if items:
+                    # 格式通常是 /watch?v=xxxx
+                    url_path = items[0].get("url", "")
+                    if "v=" in url_path:
+                        video_id = url_path.split("v=")[-1]
+                        song_title = items[0].get("title", query)
+                        print(f"[備援搜尋成功] 找到影片 ID: {video_id}")
+        except Exception as e:
+            print(f"⚠️ 備援搜尋也失敗: {e}")
 
-    # ---------------- 管道三：雲端影音直連備援介面 ----------------
-    try:
-        backup_api = f"https://nexmoe.com{encoded_query}"
-        res = requests.get(backup_api, timeout=7)
-        if res.status_code == 200:
-            data = res.json()
-            if data and data.get("url"):
-                print(f"[管道三成功] 從備援影音介面成功提取: {query}")
-                return {
-                    'title': data.get("title", query),
-                    'url': data.get("url"),
-                    'duration': int(data.get("duration", 240)) * 1000 if "duration" in data else 240000
-                }
-    except Exception as e:
-        print(f"⚠️ 管道三嘗試失敗: {e}")
+    # 如果真的連影片都搜尋不到，嘗試最後盲猜直接把關鍵字丟給公共音樂池
+    if not video_id:
+        print("⚠️ 無法取得 YouTube ID，嘗試最後網易雲音樂備援...")
+        try:
+            netease = f"https://uomg.com{urllib.parse.quote(query)}&format=json"
+            r = requests.get(netease, timeout=5).json()
+            if r.get("code") == 1 and r.get("data", {}).get("url"):
+                return {'title': r['data']['name'], 'url': r['data']['url'], 'duration': 240000}
+        except:
+            return None
+        return None
 
-    print(f"❌ [全網音樂搜尋失敗]: {query} 無法在任何開源管道中解析音訊。")
+    # ---------------- 第二步：將 YouTube 網址丟給全球 cobalt 公共節點解析音訊 ----------------
+    youtube_url = f"https://youtube.com{video_id}"
+    
+    # 精選 2026 年目前最穩定、速度最快的 cobalt 公共 API 節點清單
+    cobalt_nodes = [
+        "https://cobalt.tools",
+        "https://perennialte.ch",
+        "https://wuk.sh"
+    ]
+    
+    payload = {
+        "url": youtube_url,
+        "videoQuality": "720", # 雖然是音訊，但部分節點需要此參數
+        "downloadMode": "audio", # 💡 關鍵：指定只要音訊 (mp3/ogg/m4a)
+        "audioFormat": "mp3"
+    }
+    
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
+
+    # 輪詢各個 cobalt 節點，直到解析成功
+    for node in cobalt_nodes:
+        try:
+            print(f"[正在請求 cobalt 節點]: {node}")
+            res = requests.post(node, json=payload, headers=headers, timeout=8)
+            if res.status_code == 200:
+                data = res.json()
+                # cobalt 成功時會直接回傳一個帶有音訊直連的 "url" 欄位
+                if data.get("status") == "stream" or data.get("url"):
+                    audio_url = data.get("url")
+                    print(f"🎉 [cobalt 解析成功] 音訊直連網址: {audio_url}")
+                    return {
+                        'title': song_title,
+                        'url': audio_url,
+                        'duration': 240000 # 預設 4 分鐘
+                    }
+        except Exception as node_err:
+            print(f"⚠️ cobalt 節點 {node} 失敗: {node_err}")
+            continue
+
+    print("❌ 所有 cobalt 節點均無法解析此音訊")
     return None
-
 
 def get_openrouter_response(user_message: str) -> str:
     """呼叫 OpenRouter 進行繁體中文對話（多免費模型自動輪詢備援機制）"""
