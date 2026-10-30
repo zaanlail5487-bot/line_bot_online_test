@@ -28,7 +28,7 @@ handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
 # OpenRouter 設定（優先從環境變數讀取）
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = "google/gemma-2-9b-it:free"  # 使用 OpenRouter 的免費模型
+OPENROUTER_MODEL = "OpenRouter/free"  # 使用 OpenRouter 的免費模型
 
 
 def send_broadcast_message(text_content: str) -> bool:
