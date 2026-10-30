@@ -91,18 +91,18 @@ def get_openrouter_response(user_message: str) -> str:
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY.strip()}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://render.com", # OpenRouter 建議提供，有助於排名
+        "HTTP-Referer": "https://render.com", 
         "X-Title": "LineBot"
     }
     
-    api_url = "https://https://openrouter.ai"
+    # 💡 修正：移除重複的 https://
+    api_url = "https://openrouter.ai"
     import json
 
-    # 依序嘗試清單中的每一個模型
     for model in available_models:
         try:
             payload = {
-                "model": model,  # 💡 修正：必須是單一字串，不能是陣列
+                "model": model,
                 "messages": [
                     {"role": "system", "content": "你是一個 Line 上的繁體中文 AI 助手，請簡潔親切地回答問題。"},
                     {"role": "user", "content": user_message}
@@ -114,12 +114,11 @@ def get_openrouter_response(user_message: str) -> str:
                 api_url, 
                 headers=headers, 
                 data=json.dumps(payload),
-                timeout=15  # 縮短單次超時時間，以便快速切換下一個模型
+                timeout=15
             )
                 
             if res.status_code == 200:
                 response_json = res.json()
-                # 💡 修正：正確的 JSON 層級解析路徑
                 choices = response_json.get("choices")
                 if choices and len(choices) > 0:
                     content = choices[0].get("message", {}).get("content", "").strip()
@@ -127,15 +126,15 @@ def get_openrouter_response(user_message: str) -> str:
                         print(f"[AI 回應成功] 使用模型: {model}")
                         return content
             
-            # 如果狀態碼不是 200（例如 429 被限流，或 503 伺服器載重），就印出紀錄並繼續下一輪迴圈
-            print(f"⚠️ 模型 {model} 請求失敗 (狀態碼: {res.status_code})，嘗試下一個備援...")
+            # 如果失敗，印出當前模型的錯誤狀態碼與原因，方便在 Render Log 中排查
+            print(f"⚠️ 模型 {model} 請求失敗 (狀態碼: {res.status_code})，原因: {res.text}，嘗試下一個備援...")
             
         except Exception as e:
             print(f"⚠️ 連線模型 {model} 發生異常: {e}，嘗試下一個備援...")
             continue
             
-    # 如果迴圈走完都沒有任何一個模型成功
     return "❌ 所有 AI 免費備援模型目前皆處於高負載或被限流狀態，請稍後再試。"
+
 
 # ---------------- HTTP 群發 API ----------------
 
