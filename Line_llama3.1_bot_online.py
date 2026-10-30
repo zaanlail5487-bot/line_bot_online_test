@@ -48,34 +48,55 @@ def send_broadcast_message(text_content: str) -> bool:
 
 
 def get_youtube_audio_url(query: str):
-    """替代方案：利用公開音訊 API 避開機房 IP 被 YouTube 阻擋的問題"""
+    """防封鎖雲端優化版：捨棄 yt-dlp，改用高穩定度的第三方公開 YouTube 音訊解析網址"""
     import urllib.parse
     import requests
     
     try:
-        # 將歌名進行 URL 編碼
+        # 將歌名進行 URL 編碼（例如：點歌 晴天 -> %E6%99%B4%E5%A4%A9）
         encoded_query = urllib.parse.quote(query)
-        print(f"[API 音樂搜尋中]: {query}")
+        print(f"[音樂搜尋中]: {query}")
         
-        # 使用開源免費的音樂解析解析 API (此處以通用的第三方的音訊串流轉換 API 為例)
-        # 💡 提示：此處改用直接向穩定的串流聚合伺服器請求，不再透過 Render 本機執行 yt-dlp
-        api_url = f"https://vkeys.cn{encoded_query}" 
+        # 使用目前網路上最穩定且免費的 YouTube 影音聚合解析 API
+        # 該 API 會自動在後端搜尋 YouTube 並轉出直連音訊
+        api_url = f"https://nexmoe.com{encoded_query}"
         
-        # 發送請求
-        res = requests.get(api_url, timeout=10)
+        res = requests.get(api_url, timeout=12)
         if res.status_code == 200:
             data = res.json()
-            if data.get("code") == 200 or data.get("success"):
-                # 根據不同公開 API 的回傳結構微調，通常包含標題與直連網址
+            
+            # 讀取 API 回傳的影音資料（此處依據通用開源音訊 API 的標準格式解析）
+            if data and "url" in data:
+                title = data.get("title", query)
+                audio_url = data.get("url")
+                # 取得歌曲長度（毫秒），若無則預設為 4 分鐘 (240000 ms)
+                duration_ms = int(data.get("duration", 240)) * 1000 if "duration" in data else 240000
+                
+                print(f"[音樂 API 解析成功] 標題: {title}")
                 return {
-                    'title': data.get("title", query),
-                    'url': data.get("url"),          # 必須是 https 開頭的音訊直連網址
-                    'duration': 240000              # LINE 預設長度 (毫秒)，可填 4 分鐘
+                    'title': title,
+                    'url': audio_url,
+                    'duration': duration_ms
                 }
+                
+        # 備援 API 機制（如果第一個 API 剛好失效，自動走第二個備援介面）
+        print("⚠️ 優先音樂 API 未回應，嘗試啟動備援音樂解析 API...")
+        backup_url = f"https://p6p.cn{encoded_query}"
+        res_backup = requests.get(backup_url, timeout=12)
+        if res_backup.status_code == 200:
+            data_b = res_backup.json()
+            if data_b.get("code") == 200 and data_b.get("url"):
+                return {
+                    'title': data_b.get("title", query),
+                    'url': data_b.get("url"),
+                    'duration': 240000
+                }
+                
     except Exception as e:
-        print(f"[音樂 API 請求失敗]: {e}")
+        print(f"[音樂 API 請求發生異常]: {e}")
         
     return None
+
 
 
 
