@@ -76,13 +76,13 @@ def get_youtube_audio_url(query: str):
 
 
 def get_openrouter_response(user_message: str) -> str:
-    """呼叫 OpenRouter Free API 進行繁體中文對話（含錯誤防護優化版）"""
+    """呼叫 OpenRouter Free API 進行繁體中文對話（精準網址與防跳轉版）"""
     if not OPENROUTER_API_KEY:
         return "❌ 系統錯誤：未設定 OpenRouter API Key，請檢查 Render 環境變數。"
         
     try:
         headers = {
-            "Authorization": f"Bearer {OPENROUTER_API_KEY.strip()}", # 確保前後沒有不小心複製到的空白
+            "Authorization": f"Bearer {OPENROUTER_API_KEY.strip()}",
             "Content-Type": "application/json"
         }
         payload = {
@@ -93,29 +93,34 @@ def get_openrouter_response(user_message: str) -> str:
             ]
         }
         
-        # 修正：改用 json.dumps 明確轉換，避免編碼爭議
         import json
+        
+        # 💡 請務必檢查此行網址，結尾絕對不能有空格，且必須是完整的 https ... /chat/completions 
+        api_url = "https://openrouter.ai/api/v1/chat/completions"
+        
         res = requests.post(
-            "https://openrouter.ai", 
+            api_url, 
             headers=headers, 
-            data=json.dumps(payload), # 明確傳遞 JSON 字串
+            data=json.dumps(payload),
+            allow_redirects=False, # 💡 關鍵：禁止自動跳轉，防止 POST 被轉為 GET 而噴 405
             timeout=30
         )
         
-        # 偵測是否成功
+        # 檢查是否發生了重新導向
+        if res.status_code in [301, 302, 307, 308]:
+            return f"❌ 偵測到網址重新導向 ({res.status_code})，請確認 api_url 網址字元是否完全正確。\n導向至: {res.headers.get('Location')}"
+            
         if res.status_code == 200:
             try:
                 response_json = res.json()
-                return response_json.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                return response_json.get("choices", [{}]).get("message", {}).get("content", "").strip()
             except Exception as json_err:
-                return f"❌ 解析 AI 回應失敗，回傳內容非 JSON。詳細：{json_err}"
+                return f"❌ 解析 AI 回應失敗：{json_err}"
         else:
-            # 如果狀態碼不是 200，直接回傳 OpenRouter 給的文字原因（例如 API KEY 錯誤或模型不支援）
             return f"❌ OpenRouter 拒絕連線 (錯誤碼: {res.status_code})\n原因: {res.text}"
             
     except Exception as e:
         return f"無法連線至 OpenRouter AI 服務: {e}"
-
 
 
 # ---------------- HTTP 群發 API ----------------
